@@ -63,16 +63,13 @@ def run(args, server):
                 exclusions = [scope.strip() for scope in FLAGS.checkpoint_exclude_scopes.split(',')]
 
         variables_to_restore = []
-        print(var_list)
-        for var in var_list: #tf.contrib.framework.get_model_variables():
-            print(var)
+
+        for var in variables_to_save: #tf.contrib.framework.get_model_variables():
             for exclusion in exclusions:
                 if var.op.name.startswith(exclusion):
-                    print("here")
                     break
-                else:
-                    print(var)
-                    variables_to_restore.append(var)
+            else:
+                variables_to_restore.append(var)
 
         if tf.gfile.IsDirectory(args.checkpoint_path):
             checkpoint_path = tf.train.latest_checkpoint(args.checkpoint_path)
