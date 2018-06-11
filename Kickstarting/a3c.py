@@ -159,7 +159,7 @@ runner appends the policy to the queue.
         yield rollout
 
 class A3C(object):
-    def __init__(self, env, task, visualise):
+    def __init__(self, env, task, visualise, teacher=None, name="trainer"):
         """
 An implementation of the A3C algorithm that is reasonably well-tuned for the VNC environments.
 Below, we will have a modest amount of complexity due to the way TensorFlow handles data parallelism.
@@ -169,16 +169,16 @@ should be computed.
 
         self.env = env
         self.task = task
+        self.teacher=teacher
         worker_device = "/job:worker/task:{}/cpu:0".format(task)
         with tf.device(tf.train.replica_device_setter(1, worker_device=worker_device)):
             with tf.variable_scope("global"):
-                self.network = LSTMPolicy(env.observation_space.shape, env.action_space.n)
-                self.global_step = tf.get_variable("global_step", [], tf.int32, initializer=tf.constant_initializer(0, dtype=tf.int32),
-                                                   trainable=False)
+                self.network = LSTMPolicy(env.observation_space.shape, env.action_space.n, name=name)
+                self.global_step = tf.get_variable("{}/global_step".format(name), [], tf.int32, initializer=tf.constant_initializer(0, dtype=tf.int32),trainable=False)
 
         with tf.device(worker_device):
             with tf.variable_scope("local"):
-                self.local_network = pi = LSTMPolicy(env.observation_space.shape, env.action_space.n)
+                self.local_network = pi = LSTMPolicy(env.observation_space.shape, env.action_space.n, name=name)
                 pi.global_step = self.global_step
 
             self.ac = tf.placeholder(tf.float32, [None, env.action_space.n], name="ac")
@@ -192,6 +192,10 @@ should be computed.
             # notice that self.ac is a placeholder that is provided externally.
             # adv will contain the advantages, as calculated in process_rollout
             pi_loss = - tf.reduce_sum(tf.reduce_sum(log_prob_tf * self.ac, [1]) * self.adv)
+            if teacher:
+                cross_entropy = tf.nn.softmax_cross_entropy_with_logits(labels=tf.nn.softmax(self.teacher.network.logits), logits=pi.logits)
+                pi_loss += 0.1*cross_entropy
+
 
             # loss of value function
             vf_loss = 0.5 * tf.reduce_sum(tf.square(pi.vf - self.r))
@@ -215,6 +219,8 @@ should be computed.
                 tf.summary.scalar("model/policy_loss", pi_loss / bs)
                 tf.summary.scalar("model/value_loss", vf_loss / bs)
                 tf.summary.scalar("model/entropy", entropy / bs)
+                if teacher:
+                    tf.summary.scalar("model/cross_entropy", cross_entropy / bs)
                 tf.summary.image("model/state", pi.x)
                 tf.summary.scalar("model/grad_global_norm", tf.global_norm(grads))
                 tf.summary.scalar("model/var_global_norm", tf.global_norm(pi.var_list))
@@ -224,6 +230,8 @@ should be computed.
                 tf.scalar_summary("model/policy_loss", pi_loss / bs)
                 tf.scalar_summary("model/value_loss", vf_loss / bs)
                 tf.scalar_summary("model/entropy", entropy / bs)
+                if teacher:
+                    tf.summary.scalar("model/cross_entropy", cross_entropy / bs)
                 tf.image_summary("model/state", pi.x)
                 tf.scalar_summary("model/grad_global_norm", tf.global_norm(grads))
                 tf.scalar_summary("model/var_global_norm", tf.global_norm(pi.var_list))
@@ -285,6 +293,9 @@ server.
             self.local_network.state_in[0]: batch.features[0],
             self.local_network.state_in[1]: batch.features[1],
         }
+
+        if self.teacher:
+            feed_dict[self.teacher.x]=batch.si
 
         fetched = sess.run(fetches, feed_dict=feed_dict)
 

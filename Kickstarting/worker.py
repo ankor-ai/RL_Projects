@@ -24,20 +24,29 @@ class FastSaver(tf.train.Saver):
 
 def run(args, server):
     env = create_env(args.env_id, client_id=str(args.task), remotes=args.remotes)
-    trainer = A3C(env, args.task, args.visualise)
+    if args.teacher:
+        teacher = A3C(env, args.task, args.visualise)
+        trainer = A3C(env, args.task, args.visualise, teacher= teacher, name="student")
+    else:
+        teacher = None
+        trainer = A3C(env, args.task, args.visualise, teacher= teacher)
 
     # Variable names that start with "local" are not saved in checkpoints.
     if use_tf12_api:
-        variables_to_save = [v for v in tf.global_variables() if not v.name.startswith("local")]
+        variables_to_save = [v for v in tf.global_variables() if not v.name.startswith("local") and "teacher" not in v.name]
+        all_student_variables = [v for v in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) if "student" in v.name]
         init_op = tf.variables_initializer(variables_to_save)
-        init_all_op = tf.global_variables_initializer()
+        init_all_op = tf.variables_initializer(all_student_variables)
     else:
-        variables_to_save = [v for v in tf.all_variables() if not v.name.startswith("local")]
+        variables_to_save = [v for v in tf.global_variables() if not v.name.startswith("local") and "teacher" not in v.name]
         init_op = tf.initialize_variables(variables_to_save)
-        init_all_op = tf.initialize_all_variables()
+        all_student_variables = [v for v in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) if "student" in v.name]
+        init_all_op = tf.variables_initializer(all_student_variables)
+
     saver = FastSaver(variables_to_save)
 
-    var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
+    var_list = all_student_variables #tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
+
     logger.info('Trainable vars:')
     for v in var_list:
         logger.info('  %s %s', v.name, v.get_shape())
@@ -48,39 +57,40 @@ def run(args, server):
 
     def get_init_fn():
 
-        if args.checkpoint_path is None:
+        if args.checkpoint_path is None and teacher is None:
             return lambda sess: init_fn(sess)
 
         # Warn the user if a checkpoint exists in the train_dir. Then we'll be
         # ignoring the checkpoint anyway.
-        train_dir = os.path.join(args.log_dir, 'train')
-        if tf.train.latest_checkpoint(train_dir):
-            logger.info('Ignoring --checkpoint_path because a checkpoint already exists in %s'% train_dir)
-            return lambda sess: init_fn(sess)
+        #train_dir = os.path.join(args.log_dir, 'train')
+        #if tf.train.latest_checkpoint(train_dir):
+        #    logger.info('Ignoring --checkpoint_path because a checkpoint already exists in %s'% train_dir)
+        #    return lambda sess: init_fn(sess)
 
-        exclusions = []
-        if args.checkpoint_exclude_scopes:
-                exclusions = [scope.strip() for scope in FLAGS.checkpoint_exclude_scopes.split(',')]
+        if args.teacher:
+            teacher_variables = [v for v in tf.global_variables() if "global/teacher" in v.name]
+            exclusions = []
+            if args.checkpoint_exclude_scopes:
+                    exclusions = [scope.strip() for scope in FLAGS.checkpoint_exclude_scopes.split(',')]
 
-        variables_to_restore = []
+            variables_to_restore = []
 
-        for var in variables_to_save: #tf.contrib.framework.get_model_variables():
-            for exclusion in exclusions:
-                if var.op.name.startswith(exclusion):
-                    break
+            for var in teacher_variables: #tf.contrib.framework.get_model_variables():
+                for exclusion in exclusions:
+                    if var.op.name.startswith(exclusion):
+                        break
+                else:
+                    variables_to_restore.append(tf.Variable(var, name=var.name.replace("teacher/","")))
+
+            if tf.gfile.IsDirectory(args.checkpoint_path):
+                checkpoint_path = tf.train.latest_checkpoint(args.checkpoint_path)
             else:
-                variables_to_restore.append(var)
+                checkpoint_path = args.checkpoint_path
 
-        if tf.gfile.IsDirectory(args.checkpoint_path):
-            checkpoint_path = tf.train.latest_checkpoint(args.checkpoint_path)
-        else:
-            checkpoint_path = args.checkpoint_path
+            logger.info('Fine-tuning from %s' % checkpoint_path)
+            print(variables_to_restore)
 
-        print(variables_to_restore)
-
-        logger.info('Fine-tuning from %s' % checkpoint_path)
-
-        return tf.contrib.framework.assign_from_checkpoint_fn(checkpoint_path,
+            return tf.contrib.framework.assign_from_checkpoint_fn(checkpoint_path,
                                               variables_to_restore,
                                               ignore_missing_vars=args.ignore_missing_vars)
 
@@ -155,6 +165,9 @@ Setting up Tensorflow for data parallel work
     parser.add_argument('--job-name', default="worker", help='worker or ps')
     parser.add_argument('--num-workers', default=1, type=int, help='Number of workers')
     parser.add_argument('--log-dir', default="/tmp/pong", help='Log directory path')
+    parser.add_argument('--teacher', action='store_true',
+                help="Whether or not to kickstarting with a teacher")
+
     parser.add_argument('--checkpoint_path', help='A path to a checkpoint from which to finetune')
     parser.add_argument('--checkpoint_exclude_scopes', help='Comma-separated list of scopes of variables to exclude when restoring from a checkpoint')
     parser.add_argument('--ignore_missing_vars', action='store_true',

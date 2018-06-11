@@ -17,7 +17,8 @@ parser.add_argument('-n', '--dry-run', action='store_true',
                     help="Print out commands rather than executing them")
 parser.add_argument('-m', '--mode', type=str, default='tmux',
                     help="tmux: run workers in a tmux session. nohup: run workers with nohup. child: run workers as child processes")
-
+parser.add_argument('--teacher', action='store_true',
+                help="Whether or not to kickstarting with a teacher")
 parser.add_argument('--checkpoint_path', help='A path to a checkpoint from which to finetune')
 parser.add_argument('--checkpoint_exclude_scopes', help='Comma-separated list of scopes of variables to exclude when restoring from a checkpoint')
 
@@ -37,7 +38,7 @@ def new_cmd(session, name, cmd, mode, logdir, shell):
         return name, "nohup {} -c {} >{}/{}.{}.out 2>&1 & echo kill $! >>{}/kill.sh".format(shell, shlex_quote(cmd), logdir, session, name, logdir)
 
 
-def create_commands(session, num_workers, remotes, env_id, logdir, shell='bash', mode='tmux', visualise=False, checkpoint_path=None, checkpoint_exclude_scopes=None):
+def create_commands(session, num_workers, remotes, env_id, logdir, shell='bash', mode='tmux', visualise=False, checkpoint_path=None, checkpoint_exclude_scopes=None, teacher=False):
     # for launching the TF workers and for launching tensorboard
     base_cmd = [
         'CUDA_VISIBLE_DEVICES=',
@@ -48,6 +49,9 @@ def create_commands(session, num_workers, remotes, env_id, logdir, shell='bash',
 
     if visualise:
         base_cmd += ['--visualise']
+
+    if teacher:
+        base_cmd += ['--teacher']
 
     if checkpoint_path:
         base_cmd += ['--checkpoint_path', checkpoint_path]
@@ -104,7 +108,7 @@ def create_commands(session, num_workers, remotes, env_id, logdir, shell='bash',
 
 def run():
     args = parser.parse_args()
-    cmds, notes = create_commands("a3c", args.num_workers, args.remotes, args.env_id, args.log_dir, mode=args.mode, visualise=args.visualise, checkpoint_path=args.checkpoint_path, checkpoint_exclude_scopes=args.checkpoint_exclude_scopes)
+    cmds, notes = create_commands("a3c", args.num_workers, args.remotes, args.env_id, args.log_dir, mode=args.mode, visualise=args.visualise, teacher=args.teacher, checkpoint_path=args.checkpoint_path, checkpoint_exclude_scopes=args.checkpoint_exclude_scopes)
     if args.dry_run:
         print("Dry-run mode due to -n flag, otherwise the following commands would be executed:")
     else:
