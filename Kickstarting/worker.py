@@ -33,12 +33,12 @@ def run(args, server):
 
     # Variable names that start with "local" are not saved in checkpoints.
     if use_tf12_api:
-        variables_to_save = [v for v in tf.global_variables() if not v.name.startswith("local") and "teacher" not in v.name]
+        variables_to_save = [v for v in tf.global_variables() if not v.name.startswith("local") and "trainer" not in v.name]
         all_student_variables = [v for v in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) if "student" in v.name]
         init_op = tf.variables_initializer(variables_to_save)
         init_all_op = tf.variables_initializer(all_student_variables)
     else:
-        variables_to_save = [v for v in tf.global_variables() if not v.name.startswith("local") and "teacher" not in v.name]
+        variables_to_save = [v for v in tf.global_variables() if not v.name.startswith("local") and "trainer" not in v.name]
         init_op = tf.initialize_variables(variables_to_save)
         all_student_variables = [v for v in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) if "student" in v.name]
         init_all_op = tf.variables_initializer(all_student_variables)
@@ -68,7 +68,7 @@ def run(args, server):
         #    return lambda sess: init_fn(sess)
 
         if args.teacher:
-            teacher_variables = [v for v in tf.global_variables() if "global/teacher" in v.name]
+            teacher_variables = [v for v in tf.global_variables() if "global/trainer" in v.name]
             exclusions = []
             if args.checkpoint_exclude_scopes:
                     exclusions = [scope.strip() for scope in FLAGS.checkpoint_exclude_scopes.split(',')]
@@ -80,7 +80,7 @@ def run(args, server):
                     if var.op.name.startswith(exclusion):
                         break
                 else:
-                    variables_to_restore.append(tf.Variable(var, name=var.name.replace("teacher/","")))
+                    variables_to_restore.append(var)
 
             if tf.gfile.IsDirectory(args.checkpoint_path):
                 checkpoint_path = tf.train.latest_checkpoint(args.checkpoint_path)

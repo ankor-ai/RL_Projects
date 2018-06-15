@@ -194,7 +194,8 @@ should be computed.
             pi_loss = - tf.reduce_sum(tf.reduce_sum(log_prob_tf * self.ac, [1]) * self.adv)
             if teacher:
                 cross_entropy = tf.nn.softmax_cross_entropy_with_logits(labels=tf.nn.softmax(self.teacher.network.logits), logits=pi.logits)
-                pi_loss += 0.1*cross_entropy
+
+                pi_loss += 0.1*tf.reduce_mean(cross_entropy)
 
 
             # loss of value function
@@ -220,7 +221,7 @@ should be computed.
                 tf.summary.scalar("model/value_loss", vf_loss / bs)
                 tf.summary.scalar("model/entropy", entropy / bs)
                 if teacher:
-                    tf.summary.scalar("model/cross_entropy", cross_entropy / bs)
+                    tf.summary.scalar("model/cross_entropy", tf.reduce_mean(cross_entropy) / bs)
                 tf.summary.image("model/state", pi.x)
                 tf.summary.scalar("model/grad_global_norm", tf.global_norm(grads))
                 tf.summary.scalar("model/var_global_norm", tf.global_norm(pi.var_list))
@@ -295,7 +296,15 @@ server.
         }
 
         if self.teacher:
-            feed_dict[self.teacher.x]=batch.si
+            feed_dict[self.teacher.local_network.x]=batch.si
+            feed_dict[self.teacher.network.x]=batch.si
+            feed_dict[self.teacher.network.state_in[0]]= batch.features[0]
+            feed_dict[self.teacher.network.state_in[1]]= batch.features[1]
+            feed_dict[self.teacher.ac]=batch.a
+            feed_dict[self.teacher.adv]= batch.adv
+            feed_dict[self.teacher.r]= batch.r
+            feed_dict[self.teacher.local_network.state_in[0]]= batch.features[0]
+            feed_dict[self.teacher.local_network.state_in[1]]= batch.features[1]
 
         fetched = sess.run(fetches, feed_dict=feed_dict)
 
