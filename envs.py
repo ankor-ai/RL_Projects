@@ -92,6 +92,7 @@ class DiagnosticsInfoI(vectorized.Filter):
         self._episode_reward = 0
         self._episode_length = 0
         self._all_rewards = []
+        self._episodes_returns = []
         self._num_vnc_updates = 0
         self._last_episode_id = -1
 
@@ -155,14 +156,17 @@ class DiagnosticsInfoI(vectorized.Filter):
         if done:
             logger.info('Episode terminating: episode_reward=%s episode_length=%s', self._episode_reward, self._episode_length)
             total_time = time.time() - self._episode_time
+
+            self._episodes_returns.append(np.sum(self._all_rewards))
             to_log["global/episode_reward"] = self._episode_reward
             to_log["global/episode_length"] = self._episode_length
             to_log["global/episode_time"] = total_time
             to_log["global/reward_per_time"] = self._episode_reward / total_time
+            to_log["global/average_return"] = np.mean(self._episodes_returns)
             self._episode_reward = 0
             self._episode_length = 0
             self._all_rewards = []
-
+            #logger.info('Episode Returns %s', self._episodes_returns)
         return observation, reward, done, to_log
 
 def _process_frame42(frame):
